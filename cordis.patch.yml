@@ -1,0 +1,9 @@
+# dsh bundle patch: inserts this plugin into a profile's layer stack.
+#
+# id must stay identical to the package name — the store contract matches
+# entryIds against it, and a bare name like "goal-ledger" collides with other
+# plugins' row ids. Keep the id line free of trailing comments: the store
+# preflight regex reads the value up to end-of-line.
+- insert:
+    - id: dsh-goal-ledger
+      name: 'dsh-goal-ledger'

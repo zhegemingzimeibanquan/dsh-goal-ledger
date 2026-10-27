@@ -1,0 +1,40 @@
+{
+  "name": "dsh-goal-ledger",
+  "version": "0.1.0",
+  "description": "Goal-distance ledger and failure-cluster panel for DeepSeek Harness — audits your own sessions, shows where goals drifted and where tool calls actually failed.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "observability",
+    "session-audit",
+    "goal-distance",
+    "failure-clustering"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  }
+}
