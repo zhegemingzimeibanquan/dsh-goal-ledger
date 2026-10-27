@@ -47,24 +47,45 @@ dsh plugin --profile desktop add file:C:/Project/dsh-goal-ledger
 
 1. 打开 设置 → 目标台账
 2. 点「开始分析」（首次扫描约几十秒；嵌入打分需要 embedding 凭据）
-3. 切换三个标签页查看：
+3. 切换五个标签页查看：
+   - **漂移场**：光点图，半径 = 离目标多远（见下）
    - **失败聚类**：按次数排序，点行展开原始错误与出现位置
    - **目标漂移**：按平均距离排序，标注判定档位
    - **漂移轮次**：单轮最漂移的 10 条
+   - **向量模型**：改 embedding 端点 / 模型 / key 变量名，带连通性测试
 
 结果会缓存到 `$DSH_HOME/dsh-goal-ledger/snapshot.json`，下次打开立即显示上次结果。
 
+## 漂移场怎么看
+
+灰蓝底、金色光点，Canvas 2D 实时绘制（无图表库，无动画依赖）：
+
+- **中心亮点** = 「最初的目标」。它是标尺的原点，不是一个会话。
+- **每个光点** = 一个目标。**半径就是距离** —— 越靠外，整段会话偏离最初措辞越远。
+- **虚线圈** = 档位阈值 0.35 / 0.50 / 0.65，和表格里的标签是同一套数字，图和数不会互相矛盾。
+- **颜色**：灰蓝 = 聚焦，浅金 = 有偏离，橙金 = 偏题，亮金 = 严重漂移。颜色只强化档位，不额外编码信息。
+- **光点大小** = 该目标经历的轮次数（取对数，防止单个长会话压掉其他点）。
+- **角度没有含义** —— 黄金角螺旋 + 按 goalId 哈希的抖动，只为了不让点叠在一起，并保证同一目标每次渲染位置一致。
+- **悬停**看目标原文、轮次、调用数、失败数。
+
+纯装饰元素（光尘、核心光晕、轨道弧、光点周围的喷溅）都在 `drawField()` 里，和几何布局分开：改观感不用碰布局，改布局不用碰观感。
+
 ## Embedding 配置
 
-默认复用你已有的火山 coding plan 凭据，无需额外配置：
+默认复用你已有的火山 coding plan 凭据，无需额外配置；也可以在设置页的「向量模型」标签里改，或直接编辑配置文件：
 
 | 项 | 默认值 |
 |---|---|
 | base URL | `https://ark.cn-beijing.volces.com/api/coding/v3` |
 | model | `doubao-embedding-vision`（2048 维） |
 | key 环境变量 | `VOLCENGINE_CODING_PLAN_API_KEY` |
+| 批量大小 | 4（上限 10） |
 
-key 解析顺序：环境变量 → `$DSH_HOME/.credentials.yaml` 的 `refs:`。**key 永不写入日志、永不出现在 API 响应里**。
+任何兼容 OpenAI `POST {baseUrl}/embeddings` 的端点都能用，内置火山方舟 / OpenAI / 硅基流动 / 阿里百炼四个预设，也可自定义。
+
+**配置里只存 key 的变量名，不存 key 本身**。key 解析顺序：环境变量 → `$DSH_HOME/.credentials.yaml` 的 `refs:`。所以 `config.json` 可以放心备份或分享。
+
+配置文件：`$DSH_HOME/dsh-goal-ledger/config.json`（`PUT /config` 写入，非法值整体拒绝、不落盘）。
 
 没有 key 时插件仍可用：失败聚类不需要网络，界面会标注「嵌入：未配置」。
 
@@ -76,11 +97,12 @@ key 解析顺序：环境变量 → `$DSH_HOME/.credentials.yaml` 的 `refs:`。
 ## 架构
 
 ```
-lib/index.js          宿主半侧：HTTP 路由 + 缓存
-lib/client.js         客户端半侧：设置页 UI
+lib/index.js          宿主半侧：HTTP 路由 + 缓存 + 配置读写
+lib/client.js         客户端半侧：设置页 UI + 漂移场 Canvas 渲染
 src/session-reader.js 会话日志解析（zstd 帧拆分、目标/轮次抽取）
 src/failure-cluster.js 失败聚类（错误签名归一 + 分类）
-src/distance.js       embedding 打分（余弦距离）
+src/embed-config.js   embedding 配置校验 / 预设 / 持久化形状
+src/distance.js       embedding 打分（余弦距离）+ 连通性探测
 test/smoke.mjs        冒烟测试：解析 + 聚类，跑真实会话，不需要 DSH 运行
 test/client-render.mjs 渲染测试：在 jsdom + 真 React 里挂载设置页组件，断言三个标签页都画出内容
 test/full.mjs         全链路：解析 → 聚类 → 真实 embedding 调用
@@ -96,7 +118,7 @@ test/full.mjs         全链路：解析 → 聚类 → 真实 embedding 调用
 
 3. **`h` 必须是 `React.createElement`，不能是 `react/jsx-runtime` 的 `jsx`**。`jsx(type, props, key)` 的第三个参数是 **key**，不是子节点；而本项目所有调用点都按 `createElement(type, props, ...children)` 变参传子节点。绑错了不会报错、不会告警、宿主日志干净，**设置页只会画出一个空壳** —— 目录里能看到「目标台账」，点进去一片空白。这个 bug 也真实发生过一次，`test/client-render.mjs` 就是为它加的回归测试。
 
-另外客户端沙箱有两点约束：`fetch` 被替换成 trap（须用 `window.fetch`），且动态 client realm 没有全局 timer（需 `inject: ['timer']`）。
+另外客户端沙箱有两点约束：`fetch` 被替换成 trap（须用 `window.fetch`），且动态 client realm 没有全局 timer（需 `inject: ['timer']`）。动画这里用 `requestAnimationFrame`，页面自己提供，不受这条限制。
 
 ## HTTP API
 
@@ -105,7 +127,9 @@ test/full.mjs         全链路：解析 → 聚类 → 真实 embedding 调用
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/status` | 缓存快照 + embedding 配置状态 |
-| GET | `/config` | 解析后的配置（不含 key） |
+| GET | `/config` | 解析后的配置 + 预设（**不含 key**，只有变量名） |
+| PUT | `/config` | `{baseUrl?, model?, keyEnv?, batchSize?, enabled?}`，非法值整体拒绝 |
+| POST | `/probe` | 用一条短文本探测端点，返回是否连通 + 维度 |
 | POST | `/analyze` | `{cwdFilter?, limit?, embed?}` 运行分析 |
 | GET | `/clusters` | 仅失败聚类（不调 embedding，快速免费） |
 
@@ -119,7 +143,19 @@ npm run test:full            # 全链路（会真实调用 embedding API）
 npm run check                # 全部文件语法检查
 ```
 
-改了 `lib/client.js` 之后**务必跑 `npm run test:render`**：宿主路由 200、语法检查通过、界面依然可能是空白，只有真正挂载组件才能发现。
+改了 `lib/client.js` 之后**务必跑 `npm run test:render`**：宿主路由 200、语法检查通过、界面依然可能是空白，只有真正挂载组件才能发现。这个测试同时验证 Canvas 真的画了东西（jsdom 没有 2D context，测试装了记录型 stub）、悬停能命中光点、以及向量模型表单的编辑→测试→保存链路。
+
+想单看漂移场效果，可以把它渲染成 PNG：
+
+```bash
+npm install --no-save @napi-rs/canvas
+node .tmp-render-field.mjs   # 读真实 snapshot.json，输出 drift-field.png
+```
+
+### 测试里两个 jsdom 坑（都真实踩过）
+
+1. **`react-dom` 必须在 jsdom 全局就位之后再 `require`**。它在模块初始化时就固化 `canUseDOM`；提前加载会让它判定「没有 DOM」，整套事件系统都不装，之后合成的 `input` 事件**永远到不了 `onChange`** —— 表现和「受控输入框坏了」一模一样，但插件代码其实是对的。
+2. **`act()` 要 await**。`act(() => {...})` 返回 thenable，不 await 会把 React 的 act 队列弄脏，后面的事件派发就静默失效。
 
 安装到 profile 后，改动同步到 `~/.dsh/profiles/desktop/node_modules/dsh-goal-ledger/`（`file:` 依赖装的是副本，不是软链），然后刷新页面；页面没换新代码就重启 DSH 桌面端。
 

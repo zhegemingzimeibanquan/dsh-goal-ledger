@@ -6,17 +6,21 @@
  * two failure modes observed on real data ("similar words, wrong answer" and
  * "long technical tasks drift naturally").
  *
- * The embedding endpoint defaults to Volcengine Ark's coding-plan API, reusing
- * the credential the user already has. Two provider limits are absorbed here:
- * at most 10 texts per request, and large batches intermittently truncate on
- * this machine (retry + halve).
+ * The endpoint is configurable (see embed-config.js); the defaults reuse the
+ * Volcengine Ark coding-plan credential the user already has. Two provider
+ * limits are absorbed here: at most 10 texts per request, and large batches
+ * intermittently truncate on this machine (retry + halve).
  */
 
-export const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3'
-export const DEFAULT_MODEL = 'doubao-embedding-vision'
-export const DEFAULT_KEY_ENV = 'VOLCENGINE_CODING_PLAN_API_KEY'
-/** Provider cap: more than this in one request is a 400. */
-export const MAX_BATCH = 10
+import {
+  DEFAULT_BASE_URL,
+  DEFAULT_MODEL,
+  DEFAULT_KEY_ENV,
+  DEFAULT_BATCH_SIZE,
+  MAX_BATCH
+} from './embed-config.js'
+
+export { DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_KEY_ENV, MAX_BATCH }
 
 /** Read `refs:` scalar entries out of DSH's credentials file. */
 export function readCredentialRefs(yamlText) {
@@ -95,8 +99,13 @@ async function postJson(url, key, payload, { timeoutMs = 90000, retries = 3 } = 
   throw new Error(`network error after ${retries} tries: ${lastErr?.message ?? lastErr}`)
 }
 
-async function embedBatch(baseUrl, key, model, texts) {
-  const data = await postJson(`${baseUrl.replace(/\/$/, '')}/embeddings`, key, { model, input: texts })
+async function embedBatch(baseUrl, key, model, texts, options = {}) {
+  const data = await postJson(
+    `${baseUrl.replace(/\/$/, '')}/embeddings`,
+    key,
+    { model, input: texts },
+    options
+  )
   const rows = data.data ?? []
   if (rows.length !== texts.length) {
     throw new Error(`expected ${texts.length} embeddings, got ${rows.length}`)
@@ -107,10 +116,42 @@ async function embedBatch(baseUrl, key, model, texts) {
 }
 
 /**
+ * Probe an endpoint with one short text: is the URL right, the key valid, the
+ * model name accepted, and how many dimensions come back?
+ *
+ * The settings page calls this before running a full analysis, so a typo shows
+ * up in seconds instead of after embedding hundreds of turns.
+ */
+export async function probeEmbedding({ baseUrl, model, key, timeoutMs = 20000 }) {
+  if (!key) return { ok: false, error: '没有可用的 API key（检查 keyEnv 指向的环境变量或 credentials ref）' }
+  const started = Date.now()
+  try {
+    const vecs = await embedBatch(
+      baseUrl ?? DEFAULT_BASE_URL,
+      key,
+      model ?? DEFAULT_MODEL,
+      ['connectivity probe'],
+      { timeoutMs, retries: 1 }
+    )
+    const vector = vecs[0] ?? []
+    return {
+      ok: true,
+      model: model ?? DEFAULT_MODEL,
+      dim: vector.length,
+      elapsedMs: Date.now() - started,
+      sample: vector.slice(0, 4).map(v => Math.round(v * 1000) / 1000)
+    }
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err), elapsedMs: Date.now() - started }
+  }
+}
+
+/**
  * Embed and score every goal.
  *
  * @param items        goals from collectGoals()
  * @param options.key  API key
+ * @param options.baseUrl / options.model / options.batchSize endpoint overrides
  * @param options.onProgress optional (done, total) callback
  */
 export async function scoreGoals(items, options = {}) {
@@ -118,7 +159,7 @@ export async function scoreGoals(items, options = {}) {
     baseUrl = DEFAULT_BASE_URL,
     model = DEFAULT_MODEL,
     key,
-    batchSize = 4,
+    batchSize = DEFAULT_BATCH_SIZE,
     onProgress
   } = options
   if (!key) throw new Error('missing API key for embeddings')
