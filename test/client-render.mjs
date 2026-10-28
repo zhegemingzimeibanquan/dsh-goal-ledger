@@ -73,14 +73,21 @@ const snapshot = {
   ],
   distance: {
     model: 'doubao-embedding-vision',
-    baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
     dim: 2048,
     turns: 207,
     scorableTurns: 159,
+    // Two links: one "same request asked twice" (strong) and one same-topic
+    // (weak). The field must draw both, and the legend must name both.
+    links: [
+      { a: 'g1', b: 'g3', distance: 0.12 },
+      { a: 'g1', b: 'g2', distance: 0.38 }
+    ],
+    linkRules: { maxDistance: 0.42, maxDegree: 3 },
     items: [
-      { goalId: 'g1', objective: '你在 C:\\Project\\dms-frontend 仓库工作', meanDistance: 0.493, turnCount: 20, totalCalls: 500, failedCalls: 20 },
-      { goalId: 'g2', objective: '只读复核员，检查落库', meanDistance: 0.211, turnCount: 9, totalCalls: 120, failedCalls: 2 },
-      { goalId: 'g3', objective: '长技术任务，天然漂移', meanDistance: 0.712, turnCount: 31, totalCalls: 900, failedCalls: 40 }
+      { goalId: 'g1', objective: '你在 C:\\Project\\dms-frontend 仓库工作', meanDistance: 0.493, turnCount: 20, totalCalls: 500, failedCalls: 20, sessionStartedAt: 1761000000000 },
+      { goalId: 'g2', objective: '只读复核员，检查落库', meanDistance: 0.211, turnCount: 9, totalCalls: 120, failedCalls: 2, sessionStartedAt: 1762000000000 },
+      { goalId: 'g3', objective: '长技术任务，天然漂移', meanDistance: 0.712, turnCount: 31, totalCalls: 900, failedCalls: 40, sessionStartedAt: 1763000000000 }
     ],
     worstTurns: [
       { distance: 0.812, turn: 7, calls: 31, objective: '你在 C:\\Project\\dms-frontend 仓库工作', preview: '先看一下目录结构' }
@@ -159,6 +166,9 @@ function makeContext2D() {
     stroke() { record('stroke') },
     fillRect() { record('fillRect') },
     fillText() { record('fillText') },
+    measureText(t) { record('measureText'); return { width: String(t).length * 5.4 } },
+    rect() { record('rect') },
+    roundRect() { record('roundRect') },
     setLineDash() {},
     createLinearGradient() { record('createLinearGradient'); return gradient },
     createRadialGradient() { record('createRadialGradient'); return gradient }
@@ -333,12 +343,17 @@ check('stat cards', /目标数/.test(text()) && /工具调用/.test(text()))
 check('field tab is default', /漂移场（半径/.test(text()))
 check('field canvas mounted', window.document.querySelectorAll('canvas').length === 1)
 check('field legend rendered', /聚焦 <0\.35/.test(text()) && /严重 0\.65\+/.test(text()))
+check('field legend names the links', /同主题 ≤0\.42/.test(text()) && /几乎同题 ≤0\.18/.test(text()))
+check('field copy explains point != turn', /每个光点是一个目标/.test(text()) && /平均距离/.test(text()))
+check('field copy explains the angle', /角度按会话开始时间顺时针排列/.test(text()))
 check('canvas actually drew', canvasCalls.total > 100, `${canvasCalls.total} ops`)
 check('canvas drew goal points', (canvasCalls.byOp.arc ?? 0) >= 3, `arc×${canvasCalls.byOp.arc ?? 0}`)
-check('canvas drew filaments', (canvasCalls.byOp.quadraticCurveTo ?? 0) >= 3,
+check('canvas drew similarity links', (canvasCalls.byOp.quadraticCurveTo ?? 0) >= 2,
   `quadraticCurveTo×${canvasCalls.byOp.quadraticCurveTo ?? 0}`)
 check('canvas drew band rings', (canvasCalls.byOp.ellipse ?? 0) >= 3, `ellipse×${canvasCalls.byOp.ellipse ?? 0}`)
-check('canvas drew ring labels', (canvasCalls.byOp.fillText ?? 0) >= 3, `fillText×${canvasCalls.byOp.fillText ?? 0}`)
+// One chip per band (0.35 / 0.50 / 0.65) + 旧/新 time-axis marks + the severe
+// point's permanent number = at least 6 texts.
+check('canvas drew ring labels', (canvasCalls.byOp.fillText ?? 0) >= 5, `fillText×${canvasCalls.byOp.fillText ?? 0}`)
 
 // Hover must resolve a point from the drawn projection and show its tooltip.
 const canvasEl = window.document.querySelector('canvas')

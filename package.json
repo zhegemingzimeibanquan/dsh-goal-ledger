@@ -1,6 +1,6 @@
 {
   "name": "dsh-goal-ledger",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Goal-distance ledger and failure-cluster panel for DeepSeek Harness — audits your own sessions, shows where goals drifted and where tool calls actually failed.",
   "type": "module",
   "license": "MIT",
@@ -58,9 +58,12 @@
     "test:correction": "node test/correction.mjs && node test/correction-wiring.mjs",
     "test:full": "node test/full.mjs",
     "test:render-field": "node test/render-field.mjs",
+    "test:links": "node test/links.mjs",
     "check": "node --check lib/index.js && node --check lib/client.js && node --check src/session-reader.js && node --check src/failure-cluster.js && node --check src/embed-config.js && node --check src/correction.js && node --check src/distance.js",
     "test:manifest": "node test/manifest.mjs",
-    "test:published": "node test/published-matches-tag.mjs"
+    "test:published": "node test/published-matches-tag.mjs",
+    "test:labels": "node test/label-collisions.mjs",
+    "test:bearing": "node test/bearing-cost.mjs"
   },
   "devDependencies": {
     "jsdom": "^26.1.0",

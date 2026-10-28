@@ -58,6 +58,115 @@ function cosineDistance(a, b) {
 export { cosineDistance }
 
 /**
+ * Goal-to-goal links: the point-to-point edges the chart is missing today.
+ *
+ * Every goal already has a vector — its objective was embedded in the same
+ * scoring pass as its turns — but the chart only ever draws goal -> turn rays,
+ * so every goal connects to its own centre and nothing else. That hides the one
+ * pattern worth acting on: "similar failures cluster" (several goals drifting
+ * the same way) and "successful paths are reusable" (goals that ended up doing
+ * nearly the same thing). Both are goal-to-goal questions, and both can be
+ * answered from vectors that are already in memory, i.e. at zero extra API
+ * cost. This builds those edges offline: pure function, no I/O, no embeddings.
+ *
+ * Pairs are undirected and deduped by unordered pair. Selection is seeded as
+ * the union of each node's nearest surviving pairs — so a pair that is in goal
+ * i's top-k but not goal j's is still kept — and then a deterministic hard cap
+ * trims any node left above `maxDegree` down to its nearest neighbours. Without
+ * that cap one dense hub turns the whole chart into a hairball; the cap is per
+ * node, so `maxDegree: 0` means "no links at all". Where a hub's neighbours all
+ * pick the hub but the hub already has `maxDegree` closer ones, the cap wins and
+ * the farthest of those edges is dropped — a node never exceeds `maxDegree`.
+ *
+ * Deterministic by construction: distance ties inside a node's neighbourhood
+ * break on node index, and the emitted list sorts by distance then `a` then `b`,
+ * so two runs over the same input compare deep-equal. Inputs are never mutated.
+ *
+ * @param vectors  number[][] goal objective vectors, index-aligned with `ids`;
+ *                 null/undefined/empty entries are skipped, not errors
+ * @param ids      string[] goalIds, same length/order as `vectors`
+ * @param options.maxDistance  cosine-distance ceiling; pairs strictly above it
+ *                             are dropped, so exactly-at-ceiling is kept
+ *                             (default 0.42)
+ * @param options.maxDegree    per-node cap on kept links (default 3, 0 = off)
+ * @returns {{a: string, b: string, distance: number}[]} ascending by distance,
+ *          ties broken by `a` then `b`; a !== b; distances rounded to 4 dp
+ */
+export function buildGoalLinks(vectors, ids, { maxDistance = 0.42, maxDegree = 3 } = {}) {
+  const n = Math.min(vectors?.length ?? 0, ids?.length ?? 0)
+  if (n < 2) return []
+
+  const cap = Number.isFinite(maxDegree) ? Math.max(0, Math.floor(maxDegree)) : 0
+  if (cap === 0) return []
+  const ceiling = Number.isFinite(maxDistance) ? maxDistance : 0.42
+  const usable = v => Array.isArray(v) && v.length > 0
+
+  // 1. Every unordered pair that survives the distance ceiling.
+  const candidate = new Map()
+  const byNode = new Map()
+  for (let i = 0; i < n; i++) {
+    if (!usable(vectors[i])) continue
+    for (let j = i + 1; j < n; j++) {
+      if (!usable(vectors[j])) continue
+      const d = cosineDistance(vectors[i], vectors[j])
+      if (d > ceiling) continue
+      const key = i * n + j
+      candidate.set(key, { i, j, d, key })
+      if (!byNode.has(i)) byNode.set(i, [])
+      if (!byNode.has(j)) byNode.set(j, [])
+      byNode.get(i).push({ other: j, key, d })
+      byNode.get(j).push({ other: i, key, d })
+    }
+  }
+  if (!candidate.size) return []
+
+  // 2. Seed with the union of each node's nearest pairs: a pair chosen by only
+  //    one endpoint still counts (it is that endpoint's neighbour, not a vote).
+  const kept = new Set()
+  for (const list of byNode.values()) {
+    list.sort((x, y) => x.d - y.d || x.other - y.other)
+    for (let k = 0; k < list.length && k < cap; k++) kept.add(list[k].key)
+  }
+
+  // 3. Enforce the degree cap for real. The union in step 2 can push a node above
+  //    `cap` because every neighbour also chose it, so walk the kept edges from
+  //    farthest to nearest and drop any edge whose endpoint is still over cap.
+  //    Removing never raises a degree, so one ordered pass bounds every node at
+  //    `cap` without a fixed-point loop. Farthest goes first on purpose: keeping
+  //    the strongest edges is the whole point of a similarity layer.
+  const keptEdges = [...kept].map(key => candidate.get(key))
+  keptEdges.sort((x, y) => y.d - x.d || y.i - x.i || y.j - x.j)
+  const degree = new Map()
+  for (const e of keptEdges) {
+    degree.set(e.i, (degree.get(e.i) ?? 0) + 1)
+    degree.set(e.j, (degree.get(e.j) ?? 0) + 1)
+  }
+  for (const e of keptEdges) {
+    if ((degree.get(e.i) ?? 0) <= cap && (degree.get(e.j) ?? 0) <= cap) continue
+    kept.delete(e.key)
+    degree.set(e.i, degree.get(e.i) - 1)
+    degree.set(e.j, degree.get(e.j) - 1)
+  }
+
+  // 4. Emit, sorted on the rounded value actually printed.
+  const round = v => Math.round(v * 10000) / 10000
+  const out = []
+  for (const key of kept) {
+    const { i, j, d } = candidate.get(key)
+    out.push({ a: ids[i], b: ids[j], distance: round(d) })
+  }
+  out.sort((x, y) => x.distance - y.distance || cmpStr(x.a, y.a) || cmpStr(x.b, y.b))
+  return out
+}
+
+/** Code-unit string compare: locale-independent, so ordering is reproducible. */
+function cmpStr(a, b) {
+  const x = String(a)
+  const y = String(b)
+  return x < y ? -1 : x > y ? 1 : 0
+}
+
+/**
  * Embed a small set of texts with the configured endpoint.
  *
  * Exported for the live path: drift correction scores one turn at a time
@@ -226,6 +335,15 @@ export async function scoreGoals(items, options = {}) {
     if (w.kind === 'turn') turnIndex.set(`${w.gi}:${w.ti}`, i)
   })
 
+  // Goal objective vectors, in item order. These were embedded above as part of
+  // the normal scoring work, so the link layer below costs no extra API calls.
+  const goalVectors = []
+  const goalIds = []
+  for (let gi = 0; gi < items.length; gi++) {
+    goalVectors.push(vectors[goalIndex.get(gi)])
+    goalIds.push(items[gi].goalId)
+  }
+
   const scored = []
   const worst = []
   for (let gi = 0; gi < items.length; gi++) {
@@ -261,6 +379,11 @@ export async function scoreGoals(items, options = {}) {
       completed: goal.completed,
       cwd: goal.cwd,
       sessionId: goal.sessionId,
+      // Timestamps for the chart's angle encoding. Both already exist upstream
+      // (collectGoals / session-reader); absent values stay explicitly null so
+      // the client can tell "no data" from "not provided by this version".
+      createdAt: goal.createdAt ?? null,
+      sessionStartedAt: goal.turns?.[0]?.started ?? null,
       turnCount: turnsOut.length,
       scorableTurns: dists.length,
       failedCalls: goal.failedCalls ?? 0,
@@ -280,6 +403,11 @@ export async function scoreGoals(items, options = {}) {
     turns: scored.reduce((s, g) => s + g.turnCount, 0),
     scorableTurns: scored.reduce((s, g) => s + g.scorableTurns, 0),
     items: scored,
+    // Goal-to-goal edges from the vectors already computed above. Empty when
+    // no goal is close enough to another — that is a real answer, not an error.
+    links: buildGoalLinks(goalVectors, goalIds),
+    // Echo the rules so the client and README cannot drift from the server.
+    linkRules: { maxDistance: 0.42, maxDegree: 3 },
     worstTurns: worst.slice(0, 20)
   }
 }

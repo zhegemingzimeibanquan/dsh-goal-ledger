@@ -42,22 +42,24 @@ const fakeRequire = (id) => {
 
 const instrumented = src.replace(
   'module.exports = { apply, inject, name }',
-  'module.exports = { apply, inject, name, __test: { layoutPoints, drawField, bandOf: band, BAND_COLORS, hash01 } }'
+  'module.exports = { apply, inject, name, __test: { layoutPoints, layoutLinks, drawField, bandOf: band, BAND_COLORS, BAND_GLOW, BANDS, LINK_STRONG, LINK_WEAK, hash01, angleByStartTime } }'
 )
 new Function('window', 'document', 'navigator', 'require', instrumented)(
   { __ModuleLoader__: loader }, documentStub, {}, fakeRequire
 )
 const mod = captured.factory(fakeRequire)
-const { layoutPoints, drawField } = mod.__test
+const { layoutPoints, layoutLinks, drawField } = mod.__test
 
 const snapshotPath = process.env.SNAPSHOT
   ?? join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'dsh-goal-ledger', 'snapshot.json')
 const snapshot = JSON.parse(await readFile(snapshotPath, 'utf8'))
 const items = snapshot.distance?.items ?? []
 const points = layoutPoints(items)
+const links = layoutLinks(snapshot.distance?.links ?? [], new Map(points.map(p => [p.id, p])))
 
 console.log('snapshot:', snapshotPath)
-console.log('goals:', points.length)
+console.log('goals:', points.length, 'links:', links.length,
+  '(strong:', links.filter(l => l.strong).length + ')')
 if (points.length) {
   const dists = points.map(p => p.distance)
   const radii = points.map(p => p.radius)
@@ -66,10 +68,21 @@ if (points.length) {
   const bands = {}
   for (const p of points) bands[p.band] = (bands[p.band] ?? 0) + 1
   console.log('band distribution:', JSON.stringify(bands))
+  const angles = points.map(p => ((p.angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2))
+  console.log('angle range:', Math.min(...angles).toFixed(2), 'to', Math.max(...angles).toFixed(2),
+    '(clockwise from 12 o\'clock)')
+  const timed = points.filter(p => typeof p.startedAt === 'number')
+  console.log('points with a start time:', timed.length, '/', points.length)
   console.log('sample:')
   for (const p of points.slice(0, 5)) {
     console.log(`  r=${p.radius.toFixed(2)} theta=${(p.angle % (Math.PI * 2)).toFixed(2)} `
       + `${p.band.padEnd(6)} ${p.distance.toFixed(3)} ${p.objective.slice(0, 40).replace(/\n/g, ' ')}`)
+  }
+  if (links.length) {
+    console.log('strongest links:')
+    for (const l of [...links].sort((a, b) => a.distance - b.distance).slice(0, 5)) {
+      console.log(`  ${l.distance.toFixed(3)} ${l.strong ? 'strong' : 'weak  '} ${l.a.slice(0, 22)} ↔ ${l.b.slice(0, 22)}`)
+    }
   }
 }
 
@@ -84,10 +97,10 @@ try {
 
 const { createCanvas } = canvas
 const W = 900
-const H = 380
+const H = 400
 const c = createCanvas(W, H)
 const g = c.getContext('2d')
-const projected = drawField(g, W, H, points, 1200, null)
+const projected = drawField(g, W, H, points, 1200, null, links)
 const out = process.env.OUT ?? join(here, '..', 'drift-field.png')
 await writeFile(out, c.toBuffer('image/png'))
-console.log(`\nwrote ${out} (${projected.length} points)`)
+console.log(`\nwrote ${out} (${projected.length} points, ${links.length} links)`)
