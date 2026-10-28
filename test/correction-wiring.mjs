@@ -41,39 +41,73 @@ globalThis.fetch = async (url, init) => {
 
 /**
  * A fake DSH composition, matching the real service/event shapes:
- *   - ctx.systemPrompt.section({ name, order, text }) — property access
+ *   - services are reached through ctx.reflect.get(name), NOT ctx.name — plain
+ *     property access throws `cannot get property "<x>" without inject`, which
+ *     is how Cordis guards undeclared service reads. Modelling the throw is the
+ *     point: an implementation that reads ctx.agents directly must fail here.
  *   - ctx.on('agent/created', ({ agent, source }) => …) — object payload
  *   - agent.ctx.on('session/event', (session, event) => …) — scoped listener
  */
-function makeHarness() {
+function makeHarness({ withAgents = true } = {}) {
   const listeners = { 'agent/created': [], 'agent/disposed': [] }
   const sections = new Map()
   const sessionListeners = []
+  const services = {
+    systemPrompt: {
+      section(s) {
+        if (sections.has(s.name)) throw new Error(`duplicate section: ${s.name}`)
+        sections.set(s.name, s)
+        return () => sections.delete(s.name)
+      }
+    }
+  }
+  if (withAgents) services.agents = { list: () => [] }
+
+  /** Mirror Cordis's reflect.get: undeclared direct reads are unavailable. */
+  const makeContext = (base, available) => {
+    const ctx = {
+      ...base,
+      reflect: {
+        get(name) {
+          const svc = available[name]
+          if (svc === undefined) return undefined
+          return svc
+        }
+      }
+    }
+    // Direct property reads of services throw, exactly as Cordis does.
+    for (const name of Object.keys(available)) {
+      if (name in base) continue
+      Object.defineProperty(ctx, name, {
+        get() {
+          throw new Error(`cannot get property "${name}" without inject`)
+        }
+      })
+    }
+    return ctx
+  }
+
+  const agentCtx = makeContext({
+    on(event, cb) {
+      if (event === 'session/event') sessionListeners.push(cb)
+      return () => {}
+    }
+  }, services)
+
   const agent = {
     id: SESSION_ID,
-    ctx: {
-      systemPrompt: {
-        section(s) {
-          if (sections.has(s.name)) throw new Error(`duplicate section: ${s.name}`)
-          sections.set(s.name, s)
-          return () => sections.delete(s.name)
-        }
-      },
-      on(event, cb) {
-        if (event === 'session/event') sessionListeners.push(cb)
-        return () => {}
-      }
-    },
+    ctx: agentCtx,
     session: { id: SESSION_ID, snapshotEvents: () => [] }
   }
-  const ctx = {
+
+  const ctx = makeContext({
     effect(fn) { const d = fn(); return typeof d === 'function' ? d : () => {} },
     on(event, cb) { (listeners[event] ??= []).push(cb); return () => {} },
     emit(event, payload) { for (const cb of listeners[event] ?? []) cb(payload) },
-    agents: { list: () => [] },
     webServer: { register() { return () => {} } },
     logger: { warn: (m) => console.log('[warn]', m) }
-  }
+  }, services)
+
   return { ctx, agent, sections, sessionListeners }
 }
 
