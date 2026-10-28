@@ -201,8 +201,18 @@ if (idxSrc) {
     )
     check('market index passes DSH validator', true, `${parsed.plugins.length} plugin(s)`)
     check('validator kept our version', parsed.plugins[0].versions[0].version === manifest.version)
-    check('shipped index pins a real 40-hex commit',
-      /^[0-9a-f]{40}$/.test(parsed.plugins[0].versions[0].source.commit ?? ''))
+
+    // The install target must name the artefact this manifest describes. A Git
+    // source pins a commit; an npm source resolves by version, so the version
+    // itself is the thing to check.
+    const published = parsed.plugins[0].versions[0]
+    if (published.source.type === 'git') {
+      check('git source pins a real 40-hex commit',
+        /^[0-9a-f]{40}$/.test(published.source.commit ?? ''), published.source.commit)
+    } else {
+      check('npm source declares no commit', published.source.commit === undefined)
+      check('npm source version matches the manifest', published.version === manifest.version)
+    }
   } catch (err) {
     check('market index passes DSH validator', false, `${err.path ?? ''} ${err.reason ?? err.message}`)
   }
