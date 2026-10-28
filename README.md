@@ -38,19 +38,24 @@ embedding 距离衡量的是「目标与输出的字面语义分离度」，有�
 
 ### 从插件市场装（推荐）
 
-DSH 的插件市场读取你**自己配置的索引地址**，本仓库同时托管了一份索引（`market-index.json`）。在 设置 → 插件 → 发现（Discover）里添加这个地址：
+DSH 的插件市场读取你**自己配置的索引地址**。本插件已发布到 npm，索引随包提供，在 设置 → 插件 → 发现（Discover）里添加：
 
 ```
-https://raw.githubusercontent.com/zhegemingzimeibanquan/dsh-goal-ledger/master/market-index.json
+https://unpkg.com/dsh-goal-ledger@0.2.1/market-index.json
 ```
 
 然后在市场里搜索「目标台账」或 `dsh-goal-ledger` 安装即可。
 
+**为什么用 unpkg 而不是 GitHub raw**：实测这台机器访问 `raw.githubusercontent.com` 会被连接重置（curl 与 node 均 `ECONNRESET`，3/3 失败），而 `unpkg.com` 稳定 200。索引地址是用户手动填的，必须给一个真的能打开的。
+
 ### 命令行装
 
 ```bash
-# 从市场索引的同一份源码安装（固定 commit，无需 npm 账号）
-dsh plugin --profile desktop add git+https://github.com/zhegemingzimeibanquan/dsh-goal-ledger.git#6afaf8038d0d4b84b1b92eb4f16a5cc103b55bfe
+# 从 npm 装（推荐，48 KB，秒级）
+dsh plugin --profile desktop add dsh-goal-ledger
+
+# 从 Git 装（固定 commit，不走 npm 缓存）
+dsh plugin --profile desktop add git+https://github.com/zhegemingzimeibanquan/dsh-goal-ledger.git#f7669338eae9e15acb3a263890cc88d79e8ef0f1
 
 # 或者从本地目录装（开发用）
 dsh plugin --profile desktop add file:C:/Project/dsh-goal-ledger
@@ -202,6 +207,7 @@ test/full.mjs         全链路：解析 → 聚类 → 真实 embedding 调用
 npm install                  # 装 devDependencies（react / react-dom / jsdom）
 npm run test:render          # 渲染回归测试，离线，不需要 DSH 运行
 npm run test:correction      # 纠正逻辑 + 动态配置路由，离线
+npm run test:manifest        # 用 DSH 自己的校验器验证 manifest 与 market-index
 npm test                     # 冒烟测试，直接跑真实会话
 npm run test:full            # 全链路（会真实调用 embedding API）
 npm run check                # 全部文件语法检查
@@ -215,6 +221,31 @@ npm run check                # 全部文件语法检查
 npm install --no-save @napi-rs/canvas
 npm run test:render-field    # 读真实 snapshot.json，输出 drift-field.png
 ```
+
+### 发布新版本
+
+`market-index.json` 随包发布，所以索引地址里的版本号**必须与实际发布版本一致**，并且要**先发布、后更新索引**——否则用户读到的索引指向一个还不存在的版本。
+
+```bash
+# 1. 改版本号（package.json 与 market-index.json 两处都要改）
+npm version 0.2.2 --no-git-tag-version
+
+# 2. 同步索引里的 version 与 publishTimestamp
+node -e "const fs=require('fs');const f='market-index.json';const d=JSON.parse(fs.readFileSync(f,'utf8'));d.plugins[0].versions[0].version=require('./package.json').version;d.plugins[0].versions[0].publishTimestamp=Math.floor(Date.now()/1000);fs.writeFileSync(f,JSON.stringify(d,null,2)+'\n')"
+
+# 3. 校验后发布
+npm run test:manifest
+npm publish --registry=https://registry.npmjs.org --access public
+
+# 4. 确认 unpkg 已同步（发布后通常 1-5 分钟）
+curl -sS -o /dev/null -w "%{http_code}\n" https://unpkg.com/dsh-goal-ledger@0.2.2/market-index.json
+```
+
+**索引地址必须带精确版本号**：`unpkg.com/dsh-goal-ledger/market-index.json` 会 302 重定向到最新版，而 DSH 市场**拒绝重定向**（文档明确写「Redirects refused」），所以只能写 `@0.2.2` 这种精确地址。
+
+### 为什么不在 GitHub raw 上托管索引
+
+实测本机访问 `raw.githubusercontent.com` **全部被重置**（curl 与 node 都 `ECONNRESET`，3/3 失败），而同一时刻 `github.com`、`api.github.com`、`npmjs.org`、`unpkg.com` 都正常。索引地址是用户手动配置的，必须给一个真的打得开的——所以索引随 npm 包走 unpkg。
 
 ### 测试里两个 jsdom 坑（都真实踩过）
 
