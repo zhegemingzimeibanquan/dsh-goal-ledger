@@ -56,6 +56,25 @@ function walk(dir, base = dir, acc = new Map()) {
 const publishedFiles = walk(path.join(outDir, 'package'))
 console.log(`published ${version}: ${publishedFiles.size} files, ${tarballBuf.length} bytes\n`)
 
+/**
+ * Compare published bytes against committed bytes.
+ *
+ * Line endings are normalized: npm packs the working tree as-is, so on Windows
+ * every text file ships with CRLF while git stores LF. That is a packing
+ * artifact, not a content difference — the files are identical once normalized,
+ * and refusing to normalize would make this check permanently red on Windows for
+ * every release.
+ *
+ * Binary files are not text and get no normalization.
+ */
+const TEXT_EXTENSIONS = /\.(md|json|js|mjs|cjs|yml|yaml|txt)$/i
+const sameContent = (relPath, publishedBuf, committedBuf) => {
+  if (!TEXT_EXTENSIONS.test(relPath)) return publishedBuf.equals(committedBuf)
+  const a = publishedBuf.toString('utf8').replace(/\r\n/g, '\n')
+  const b = committedBuf.toString('utf8').replace(/\r\n/g, '\n')
+  return a === b
+}
+
 // --- what the commit contains ---------------------------------------------
 const committed = execSync(`git ls-tree -r --name-only ${ref}`, { encoding: 'utf8' })
   .split('\n')
@@ -85,14 +104,15 @@ for (const [rel, full] of publishedFiles) {
   const publishedBuf = fs.readFileSync(full)
   const committedBuf = Buffer.from(committedText, 'utf8')
   compared++
-  if (hash(publishedBuf) !== hash(committedBuf)) {
+  if (!sameContent(rel, publishedBuf, committedBuf)) {
     mismatched.push(`${rel} (published ${hash(publishedBuf)} != tag ${hash(committedBuf)})`)
   }
 }
 
-check('every published file exists in the tag', mismatched.every(m => !m.includes('not in')), mismatched.filter(m => m.includes('not in')).join('; ') || 'none missing')
-check('every published file matches the tag byte-for-byte', mismatched.length === 0,
-  mismatched.length ? mismatched.join('; ') : `${compared} files compared`)
+check('every published file exists in the tag', mismatched.every(m => !m.includes('not in')),
+  mismatched.filter(m => m.includes('not in')).join('; ') || 'none missing')
+check('every published file matches the tag', mismatched.length === 0,
+  mismatched.length ? mismatched.join('; ') : `${compared} files compared (text normalized to LF)`)
 
 // --- package.json identity fields -----------------------------------------
 const pubPkg = JSON.parse(fs.readFileSync(path.join(outDir, 'package', 'package.json'), 'utf8'))
