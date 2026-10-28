@@ -41,7 +41,7 @@ embedding 距离衡量的是「目标与输出的字面语义分离度」，有�
 DSH 的插件市场读取你**自己配置的索引地址**。本插件已发布到 npm，索引随包提供，在 设置 → 插件 → 发现（Discover）里添加：
 
 ```
-https://unpkg.com/dsh-goal-ledger@0.3.0/market-index.json
+https://unpkg.com/dsh-goal-ledger@0.3.1/market-index.json
 ```
 
 然后在市场里搜索「目标台账」或 `dsh-goal-ledger` 安装即可。

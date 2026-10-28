@@ -1,6 +1,6 @@
 {
   "name": "dsh-goal-ledger",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Goal-distance ledger and failure-cluster panel for DeepSeek Harness — audits your own sessions, shows where goals drifted and where tool calls actually failed.",
   "type": "module",
   "license": "MIT",
