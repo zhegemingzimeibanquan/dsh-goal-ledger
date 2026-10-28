@@ -47,14 +47,42 @@ dsh plugin --profile desktop add file:C:/Project/dsh-goal-ledger
 
 1. 打开 设置 → 目标台账
 2. 点「开始分析」（首次扫描约几十秒；嵌入打分需要 embedding 凭据）
-3. 切换五个标签页查看：
+3. 切换六个标签页查看：
    - **漂移场**：光点图，半径 = 离目标多远（见下）
    - **失败聚类**：按次数排序，点行展开原始错误与出现位置
    - **目标漂移**：按平均距离排序，标注判定档位
    - **漂移轮次**：单轮最漂移的 10 条
    - **向量模型**：改 embedding 端点 / 模型 / key 变量名，带连通性测试
+   - **漂移纠正**：让模型在持续偏离时被提醒拉回（默认关闭，见下）
 
 结果会缓存到 `$DSH_HOME/dsh-goal-ledger/snapshot.json`，下次打开立即显示上次结果。
+
+## 漂移纠正（opt-in）
+
+开启后，当某个目标**连续多轮**偏离时，插件在下一步的系统提示里插入一段提醒：逐字引用你最初的目标，指出当前偏离，并要求模型回到目标继续。
+
+**它不做什么**（这些是刻意的设计边界）：
+
+| 不做 | 为什么 |
+|---|---|
+| **不修改你的目标** | 自动改写目标会让「判断漂移」的锚点跟着漂移一起动，最后你可能得到一个自己没要求过的目标 |
+| **不打断正在跑的轮次** | 只在轮次之间生效，只影响后续步骤 |
+| **不调用模型来判断** | 判断完全基于本地已有的距离数据，不额外增加延迟和 token |
+| **默认不开启** | 关闭时插件不向提示里写任何东西，行为与没装插件逐字节相同 |
+
+**防误报**：长技术任务天然会偏离最初措辞（上面「已知局限」里就写了这个）。所以只有**连续 N 轮**都超过阈值才提醒，提醒后还有**冷却轮数**静默期，避免模型在「回到目标」和「推进进度」之间来回抖动。
+
+注入的文本明确要求模型：先复述目标要求什么、已完成到哪一步；指出当前哪些工作不是目标要求的；**保留所有已完成的有效工作**，不要重开任务。最后还允许它判断「其实没偏」—— 否则降低距离最省事的做法就是推倒重来，那比漂移更糟。
+
+| 参数 | 默认 | 含义 |
+|---|---|---|
+| 触发阈值 | 0.55 | 单轮距离 ≥ 此值算一次「偏离」 |
+| 连续轮数 | 2 | 连续偏离多少轮才提醒 |
+| 冷却轮数 | 3 | 提醒后静默几轮 |
+
+配置写在 `$DSH_HOME/dsh-goal-ledger/correction.json`。实现上它挂在 **agent 作用域**（`agent.ctx`）而不是全局：只影响该会话，agent 销毁时自动解绑，多会话互不干扰。
+
+**实时打分**：正在跑的会话不在缓存快照里（快照只有已落盘的会话），所以纠正用的是 `LiveScorer` —— 它折叠 `session/event` 的实时事件流，事件形状和离线分析器读的是同一套（`turn/start` 开轮、`assistant/message` 累积、`turn/end` 收轮），所以「当场决定要不要提醒」和「事后报表里的距离」不会互相矛盾。锚点优先取 `create_goal` 的 objective，没有则取第一条真实用户消息（同样剥掉宿主注入的样板文本）。每个已打分轮次一次 embed 调用，objective 只 embed 一次。
 
 ## 漂移场怎么看
 
@@ -97,18 +125,22 @@ dsh plugin --profile desktop add file:C:/Project/dsh-goal-ledger
 ## 架构
 
 ```
-lib/index.js          宿主半侧：HTTP 路由 + 缓存 + 配置读写
+lib/index.js          宿主半侧：HTTP 路由 + 缓存 + 配置读写 + agent 作用域的纠正注入
 lib/client.js         客户端半侧：设置页 UI + 漂移场 Canvas 渲染
 src/session-reader.js 会话日志解析（zstd 帧拆分、目标/轮次抽取）
 src/failure-cluster.js 失败聚类（错误签名归一 + 分类）
 src/embed-config.js   embedding 配置校验 / 预设 / 持久化形状
 src/distance.js       embedding 打分（余弦距离）+ 连通性探测
+src/correction.js     漂移纠正：滞后判定、冷却、实时打分（LiveScorer）、提示文本生成
 test/smoke.mjs        冒烟测试：解析 + 聚类，跑真实会话，不需要 DSH 运行
-test/client-render.mjs 渲染测试：在 jsdom + 真 React 里挂载设置页组件，断言三个标签页都画出内容
+test/client-render.mjs 渲染测试：在 jsdom + 真 React 里挂载设置页组件，断言每个标签页都画出内容
+test/correction.mjs   纠正决策逻辑 + 动态配置路由，离线
+test/correction-wiring.mjs 接线测试：用形状一致的假 ctx 驱动 apply()，验证纠正文本真的到达提示词
+test/render-field.mjs 把漂移场渲染成 PNG，用真实 snapshot 数据
 test/full.mjs         全链路：解析 → 聚类 → 真实 embedding 调用
 ```
 
-### 三个必须知道的实现陷阱
+### 五个必须知道的实现陷阱
 
 写这个插件时踩到、并已在代码里注释说明的：
 
@@ -117,6 +149,10 @@ test/full.mjs         全链路：解析 → 聚类 → 真实 embedding 调用
 2. **失败在 `data.error`，不在 `data.ok`**。`tool/result` 事件带 `data.message` 和一个可选的兄弟字段 `data.error`，没有布尔 `ok`。检查 `ok` 会让每个会话都报告 0 失败 —— 这个 bug 在本项目里真实发生过一次，修复后从 0 变成 81。
 
 3. **`h` 必须是 `React.createElement`，不能是 `react/jsx-runtime` 的 `jsx`**。`jsx(type, props, key)` 的第三个参数是 **key**，不是子节点；而本项目所有调用点都按 `createElement(type, props, ...children)` 变参传子节点。绑错了不会报错、不会告警、宿主日志干净，**设置页只会画出一个空壳** —— 目录里能看到「目标台账」，点进去一片空白。这个 bug 也真实发生过一次，`test/client-render.mjs` 就是为它加的回归测试。
+
+4. **`ctx.systemPrompt.section()` 的 `text()` 拿不到会话身份**。它是个无参 thunk，全局注册时无法知道这次组装是给哪个会话的 —— 只能靠「猜」哪个 pending 最可能，多会话并发时必然错。正确做法是把 section 注册到 **`agent.ctx`（agent 作用域）**，每个 agent 各注册一份，闭包里直接捕获 `sessionId`，销毁时自动解绑。这也正是 agent preset 用的同一个接缝。
+
+5. **DSH 的服务是属性访问，事件 payload 是对象**。写宿主接线时想当然地用了 `ctx.get('agents')` 和 `agents.on('agent/created', agent => …)` —— 两个都是错的：Cordis 里服务挂在 `ctx.agents` / `agent.ctx.systemPrompt` 上（`ctx.get` 在整个 DSH 代码库里不存在），而 `agent/created` 的 payload 是 `{ agent, source }`，`agent/disposed` 是 `{ agent }`。错的结果是**整条纠正链路静默不挂载**：不抛异常、不打日志，功能就是不生效。`test/correction-wiring.mjs` 用形状一致的假 ctx 驱动 `apply()`，把这两处各自注入回去验证过，测试都会红。
 
 另外客户端沙箱有两点约束：`fetch` 被替换成 trap（须用 `window.fetch`），且动态 client realm 没有全局 timer（需 `inject: ['timer']`）。动画这里用 `requestAnimationFrame`，页面自己提供，不受这条限制。
 
@@ -132,24 +168,27 @@ test/full.mjs         全链路：解析 → 聚类 → 真实 embedding 调用
 | POST | `/probe` | 用一条短文本探测端点，返回是否连通 + 维度 |
 | POST | `/analyze` | `{cwdFilter?, limit?, embed?}` 运行分析 |
 | GET | `/clusters` | 仅失败聚类（不调 embedding，快速免费） |
+| GET | `/correction` | 漂移纠正配置 + 各会话的实时状态 |
+| PUT | `/correction` | `{enabled?, threshold?, minStreak?, cooldownTurns?, windowSize?}` |
 
 ## 开发
 
 ```bash
 npm install                  # 装 devDependencies（react / react-dom / jsdom）
 npm run test:render          # 渲染回归测试，离线，不需要 DSH 运行
+npm run test:correction      # 纠正逻辑 + 动态配置路由，离线
 npm test                     # 冒烟测试，直接跑真实会话
 npm run test:full            # 全链路（会真实调用 embedding API）
 npm run check                # 全部文件语法检查
 ```
 
-改了 `lib/client.js` 之后**务必跑 `npm run test:render`**：宿主路由 200、语法检查通过、界面依然可能是空白，只有真正挂载组件才能发现。这个测试同时验证 Canvas 真的画了东西（jsdom 没有 2D context，测试装了记录型 stub）、悬停能命中光点、以及向量模型表单的编辑→测试→保存链路。
+改了 `lib/client.js` 之后**务必跑 `npm run test:render`**：宿主路由 200、语法检查通过、界面依然可能是空白，只有真正挂载组件才能发现。这个测试同时验证 Canvas 真的画了东西（jsdom 没有 2D context，测试装了记录型 stub）、悬停能命中光点、向量模型表单的编辑→测试→保存链路，以及纠正面板的开关→保存链路。
 
 想单看漂移场效果，可以把它渲染成 PNG：
 
 ```bash
 npm install --no-save @napi-rs/canvas
-node .tmp-render-field.mjs   # 读真实 snapshot.json，输出 drift-field.png
+npm run test:render-field    # 读真实 snapshot.json，输出 drift-field.png
 ```
 
 ### 测试里两个 jsdom 坑（都真实踩过）

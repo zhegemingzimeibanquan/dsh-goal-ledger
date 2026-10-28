@@ -4,7 +4,6 @@ work/
 snapshot.json
 .DS_Store
 .tmp*/
-
-# scratch
 .tmp-*
+*.tmp
 drift-field.png

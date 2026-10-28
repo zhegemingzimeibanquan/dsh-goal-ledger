@@ -197,6 +197,17 @@ function pumpFrames(count = 1) {
   return count
 }
 
+// Drift-correction config the panel reads and writes.
+const correctionPayload = {
+  config: { enabled: false, threshold: 0.55, minStreak: 2, cooldownTurns: 3, windowSize: 6 },
+  defaults: { enabled: false, threshold: 0.55, minStreak: 2, cooldownTurns: 3, windowSize: 6 },
+  sessions: [
+    { sessionId: 'session-abc123def456', turnIndex: 12, streak: 3, mean: 0.62, injections: 2, recent: [0.6, 0.62, 0.64], lastSpokeTurn: 9 }
+  ],
+  attached: 1,
+  file: 'C:\\Users\\example\\.dsh\\dsh-goal-ledger\\correction.json'
+}
+
 // --- fetch stub ------------------------------------------------------------
 const requests = []
 window.fetch = async (url, init) => {
@@ -215,6 +226,15 @@ window.fetch = async (url, init) => {
       embeddingKeyEnv: 'VOLCENGINE_CODING_PLAN_API_KEY',
       sessionsDir: snapshot.sessionsDir,
       snapshot
+    }
+  } else if (path.endsWith('/correction')) {
+    // PUT echoes the submitted config, the way the real host does, so the panel
+    // reflects what was actually saved rather than a stale fixture.
+    if (method === 'PUT') {
+      const submitted = JSON.parse(init?.body ?? '{}')
+      body = { ...correctionPayload, config: { ...correctionPayload.config, ...submitted } }
+    } else {
+      body = correctionPayload
     }
   } else if (path.endsWith('/config')) {
     body = configPayload
@@ -410,6 +430,37 @@ if (modelInput) {
   const putReq = requests.filter(r => r.path.endsWith('/config') && r.method === 'PUT')
   check('save called PUT /config', putReq.length === 1)
   check('save confirmation shown', /已保存/.test(text()))
+}
+
+// --- drift correction ------------------------------------------------------
+await click('漂移纠正')
+await settle(60)
+check('correction tab loads', /漂移纠正/.test(text()) && /触发阈值/.test(text()))
+check('correction defaults to off', /未开启/.test(text()))
+check('correction promises not to mutate goals', /不会修改你的目标/.test(text()))
+check('correction shows session state', /已观察轮次/.test(text()) && /session-abc123/.test(text()))
+check('correction shows injection count', /已提醒/.test(text()) && /0\.620/.test(text()))
+check('correction shows wiring self-check', /已接管 1 个会话/.test(text()))
+
+// Turning it on must PUT /correction with enabled:true.
+const enableBox = [...window.document.querySelectorAll('input[type="checkbox"]')]
+  .find(i => i.closest('label')?.textContent.includes('启用漂移纠正'))
+check('enable checkbox present', Boolean(enableBox))
+if (enableBox) {
+  await act(async () => {
+    enableBox.click()
+    await new Promise(r => setTimeout(r, 30))
+  })
+  const corrSave = [...window.document.querySelectorAll('button')].find(b => b.textContent.trim() === '保存')
+  check('save enabled after toggling', corrSave && !corrSave.disabled)
+  await act(async () => {
+    corrSave.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 60))
+  })
+  const corrPut = requests.filter(r => r.path.endsWith('/correction') && r.method === 'PUT')
+  check('toggling calls PUT /correction', corrPut.length === 1)
+  check('PUT body enables correction', /"enabled":true/.test(corrPut[0]?.body ?? ''))
+  check('correction confirmation shown', /已开启/.test(text()))
 }
 
 // --- unmount ---------------------------------------------------------------

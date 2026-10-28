@@ -55,6 +55,19 @@ function cosineDistance(a, b) {
   return Math.max(0, Math.min(2, 1 - sim))
 }
 
+export { cosineDistance }
+
+/**
+ * Embed a small set of texts with the configured endpoint.
+ *
+ * Exported for the live path: drift correction scores one turn at a time
+ * between turns, and cannot wait for a full-batch analysis run.
+ */
+export async function embedTexts({ baseUrl = DEFAULT_BASE_URL, model = DEFAULT_MODEL, key, texts }) {
+  if (!key) throw new Error('missing API key for embeddings')
+  return embedBatch(baseUrl, key, model, texts.slice(0, MAX_BATCH))
+}
+
 /** What a turn actually delivered, and whether it is scorable at all. */
 export function turnText(turn) {
   const text = (turn.assistant ?? []).join('\n').trim()
