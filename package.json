@@ -1,17 +1,28 @@
 {
   "name": "dsh-goal-ledger",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Goal-distance ledger and failure-cluster panel for DeepSeek Harness — audits your own sessions, shows where goals drifted and where tool calls actually failed.",
   "type": "module",
   "license": "MIT",
+  "author": "zhangruixiong <1393849546@qq.com>",
+  "homepage": "https://github.com/zhegemingzimeibanquan/dsh-goal-ledger#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhegemingzimeibanquan/dsh-goal-ledger.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zhegemingzimeibanquan/dsh-goal-ledger/issues"
+  },
   "keywords": [
+    "dsh",
     "dsh-plugin",
     "deepseek-harness",
-    "dsh",
+    "dsh-goal-ledger",
     "observability",
     "session-audit",
     "goal-distance",
-    "failure-clustering"
+    "failure-clustering",
+    "drift-detection"
   ],
   "dsh": {
     "bundle": {
@@ -19,6 +30,11 @@
     },
     "client": {
       "platform": "web"
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.1-rc.3": "compatible"
+      }
     }
   },
   "exports": {
@@ -37,10 +53,11 @@
   "scripts": {
     "test": "node test/smoke.mjs",
     "test:render": "node test/client-render.mjs",
+    "test:correction": "node test/correction.mjs && node test/correction-wiring.mjs",
     "test:full": "node test/full.mjs",
-    "check": "node --check lib/index.js && node --check lib/client.js && node --check src/session-reader.js && node --check src/failure-cluster.js && node --check src/embed-config.js && node --check src/correction.js && node --check src/distance.js",
     "test:render-field": "node test/render-field.mjs",
-    "test:correction": "node test/correction.mjs && node test/correction-wiring.mjs"
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check src/session-reader.js && node --check src/failure-cluster.js && node --check src/embed-config.js && node --check src/correction.js && node --check src/distance.js",
+    "test:manifest": "node test/manifest.mjs"
   },
   "devDependencies": {
     "jsdom": "^26.1.0",
@@ -48,6 +65,7 @@
     "react-dom": "^18.3.1"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "dsh": ">=0.2.1-rc.3"
   }
 }

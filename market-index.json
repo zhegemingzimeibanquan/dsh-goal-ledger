@@ -1,0 +1,98 @@
+{
+  "format": 1,
+  "title": {
+    "en": "Goal Ledger Plugins",
+    "zh": "目标台账插件源"
+  },
+  "description": {
+    "en": "Session auditing for DeepSeek Harness: which goals drifted from what you asked, and where tool calls actually failed.",
+    "zh": "DeepSeek Harness 的会话审计：哪些目标偏离了你的原始要求，以及工具调用到底在哪里失败。"
+  },
+  "metadata": {
+    "categories": {
+      "observability": {
+        "title": {
+          "en": "Observability",
+          "zh": "可观测性"
+        }
+      }
+    },
+    "labels": {
+      "drift-detection": {
+        "title": {
+          "en": "Drift detection",
+          "zh": "漂移检测"
+        }
+      },
+      "failure-analysis": {
+        "title": {
+          "en": "Failure analysis",
+          "zh": "失败分析"
+        }
+      },
+      "session-audit": {
+        "title": {
+          "en": "Session audit",
+          "zh": "会话审计"
+        }
+      },
+      "local-only": {
+        "title": {
+          "en": "Local only",
+          "zh": "纯本地"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh-goal-ledger",
+      "title": {
+        "en": "Goal Ledger",
+        "zh": "目标台账"
+      },
+      "description": {
+        "en": "Audits your own DSH sessions: a failure-cluster table of what actually broke, a drift-field chart of how far each goal wandered from its objective, and an opt-in correction that re-anchors a goal that keeps drifting. Reads session logs only — never modifies them.",
+        "zh": "审计你自己的 DSH 会话：失败聚类表告诉你到底什么坏了，漂移场图展示每个目标偏离原始要求有多远，还可选开启「漂移纠正」把跑偏的目标拉回来。只读会话日志，绝不修改。"
+      },
+      "author": "zhangruixiong",
+      "homepage": "https://github.com/zhegemingzimeibanquan/dsh-goal-ledger#readme",
+      "repository": {
+        "url": "https://github.com/zhegemingzimeibanquan/dsh-goal-ledger"
+      },
+      "metadata": {
+        "category": "observability",
+        "keywords": [
+          "dsh",
+          "dsh-plugin",
+          "deepseek-harness",
+          "observability",
+          "session-audit",
+          "goal-distance",
+          "failure-clustering",
+          "drift-detection"
+        ],
+        "labels": [
+          "drift-detection",
+          "failure-analysis",
+          "session-audit",
+          "local-only"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.2.0",
+          "publishTimestamp": 1793156369,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/zhegemingzimeibanquan/dsh-goal-ledger",
+            "commit": "6afaf8038d0d4b84b1b92eb4f16a5cc103b55bfe"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.3"
+          }
+        }
+      ]
+    }
+  ]
+}

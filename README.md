@@ -36,12 +36,37 @@ embedding 距离衡量的是「目标与输出的字面语义分离度」，有�
 
 ## 安装
 
+### 从插件市场装（推荐）
+
+DSH 的插件市场读取你**自己配置的索引地址**，本仓库同时托管了一份索引（`market-index.json`）。在 设置 → 插件 → 发现（Discover）里添加这个地址：
+
+```
+https://raw.githubusercontent.com/zhegemingzimeibanquan/dsh-goal-ledger/master/market-index.json
+```
+
+然后在市场里搜索「目标台账」或 `dsh-goal-ledger` 安装即可。
+
+### 命令行装
+
 ```bash
-# 从本地目录装进 desktop profile
+# 从市场索引的同一份源码安装（固定 commit，无需 npm 账号）
+dsh plugin --profile desktop add git+https://github.com/zhegemingzimeibanquan/dsh-goal-ledger.git#6afaf8038d0d4b84b1b92eb4f16a5cc103b55bfe
+
+# 或者从本地目录装（开发用）
 dsh plugin --profile desktop add file:C:/Project/dsh-goal-ledger
 ```
 
 装完重启 DSH 桌面端，设置面板里会出现「目标台账」。
+
+### 系统要求
+
+| 项 | 要求 |
+|---|---|
+| DSH | **>= 0.2.1-rc.3**（`engines.dsh`，安装前会校验，低于此版本会被拒装） |
+| Node.js | >= 22 |
+| 网络 | 可选。失败聚类完全离线；只有「向量模型」打分需要网络 |
+
+插件本身**零运行时依赖**，不引入任何第三方包。
 
 ## 使用
 
