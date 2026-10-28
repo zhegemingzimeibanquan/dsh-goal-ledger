@@ -86,7 +86,7 @@
           "source": {
             "type": "git",
             "url": "https://github.com/zhegemingzimeibanquan/dsh-goal-ledger",
-            "commit": "6afaf8038d0d4b84b1b92eb4f16a5cc103b55bfe"
+            "commit": "f7669338eae9e15acb3a263890cc88d79e8ef0f1"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.3"
