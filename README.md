@@ -41,7 +41,7 @@ embedding 距离衡量的是「目标与输出的字面语义分离度」，有�
 DSH 的插件市场读取你**自己配置的索引地址**。本插件已发布到 npm，索引随包提供，在 设置 → 插件 → 发现（Discover）里添加：
 
 ```
-https://unpkg.com/dsh-goal-ledger@0.2.1/market-index.json
+https://unpkg.com/dsh-goal-ledger@0.2.2/market-index.json
 ```
 
 然后在市场里搜索「目标台账」或 `dsh-goal-ledger` 安装即可。
@@ -224,24 +224,40 @@ npm run test:render-field    # 读真实 snapshot.json，输出 drift-field.png
 
 ### 发布新版本
 
-`market-index.json` 随包发布，所以索引地址里的版本号**必须与实际发布版本一致**，并且要**先发布、后更新索引**——否则用户读到的索引指向一个还不存在的版本。
+### 发布新版本
+
+顺序很重要：**先提交、再打 tag、最后发布**。反过来的话，npm 上的内容和 tag 指向的代码会对不上，而这件事没有任何工具会报错——`test/published-matches-tag.mjs` 就是为它写的。
+
+`market-index.json` 随包发布，所以索引里记的版本号与 manifest 的版本号必须是同一个事实的两次记录。
 
 ```bash
-# 1. 改版本号（package.json 与 market-index.json 两处都要改）
-npm version 0.2.2 --no-git-tag-version
+# 1. 同步升版本（package.json 与 market-index.json 一起改，避免只改一处）
+node scripts/bump-version.cjs 0.2.3
 
-# 2. 同步索引里的 version 与 publishTimestamp
-node -e "const fs=require('fs');const f='market-index.json';const d=JSON.parse(fs.readFileSync(f,'utf8'));d.plugins[0].versions[0].version=require('./package.json').version;d.plugins[0].versions[0].publishTimestamp=Math.floor(Date.now()/1000);fs.writeFileSync(f,JSON.stringify(d,null,2)+'\n')"
+# 2. 更新 README 里的索引地址（用户要从这里复制）
+#    https://unpkg.com/dsh-goal-ledger@0.2.3/market-index.json
 
-# 3. 校验后发布
+# 3. 校验，并跑一遍全量测试
 npm run test:manifest
-npm publish --registry=https://registry.npmjs.org --access public
+npm test && npm run test:correction && npm run test:render
 
-# 4. 确认 unpkg 已同步（发布后通常 1-5 分钟）
-curl -sS -o /dev/null -w "%{http_code}\n" https://unpkg.com/dsh-goal-ledger@0.2.2/market-index.json
+# 4. 提交，打 tag（与 package.json 版本一致，带 v 前缀）
+git add -A && git commit -m "release: v0.2.3"
+git tag -a v0.2.3 -m "dsh-goal-ledger v0.2.3"
+git push origin master --follow-tags
+
+# 5. 发布，然后断言 npm 上的内容就是 tag 里的内容
+npm publish --registry=https://registry.npmjs.org --access public
+npm run test:published -- 0.2.3 v0.2.3
+
+# 6. 等 unpkg 同步后确认索引可读（正常 1-5 分钟）
+npm run test:published -- 0.2.3 v0.2.3   # 再跑一次即为复查
+curl -sS -o /dev/null -w "%{http_code}\n" https://unpkg.com/dsh-goal-ledger@0.2.3/market-index.json
 ```
 
-**索引地址必须带精确版本号**：`unpkg.com/dsh-goal-ledger/market-index.json` 会 302 重定向到最新版，而 DSH 市场**拒绝重定向**（文档明确写「Redirects refused」），所以只能写 `@0.2.2` 这种精确地址。
+`test:published` 会把 npm 上的 tarball 解开，逐文件与 tag 里的 git 内容比对，并核对 `version` / `engines` / `dsh` / `exports` / `files` 字段。**这是「npm 发布的就是这个 tag」的唯一硬证据**。
+
+**索引地址必须带精确版本号**：`unpkg.com/dsh-goal-ledger/market-index.json` 会 302 重定向到最新版，而 DSH 市场**拒绝重定向**（文档明确写「Redirects refused」），所以只能写 `@0.2.3` 这种精确地址。
 
 ### 为什么不在 GitHub raw 上托管索引
 
